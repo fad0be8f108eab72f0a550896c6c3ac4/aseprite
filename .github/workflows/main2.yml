@@ -1,0 +1,79 @@
+name: 🔧 Windows Aseprite Build & Download
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    
+    steps:
+    - name: 📥 Checkout repository
+      uses: actions/checkout@v4
+      with:
+        submodules: 'recursive'
+        
+    - name: 🛠️ Install Dependencies
+      run: |
+        choco install -y cmake --installargs 'ADD_CMAKE_TO_PATH=System'
+        choco install -y ninja
+        
+    - name: ⬇️ Download Skia
+      shell: pwsh
+      run: |
+        # Get latest Skia for Windows x64
+        $url = "https://github.com/aseprite/skia/releases/latest/download/Skia-Windows-Release-x64.zip"
+        Invoke-WebRequest -Uri $url -OutFile "skia.zip"
+        Expand-Archive -Path "skia.zip" -DestinationPath "C:/deps/skia" -Force
+        echo "Skia downloaded to C:/deps/skia"
+        
+    - name: ⚙️ Configure with CMake
+      shell: pwsh
+      run: |
+        mkdir build
+        cd build
+        cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo `
+              -DLAF_BACKEND=skia `
+              -DSKIA_DIR=C:/deps/skia `
+              -DSKIA_LIBRARY_DIR=C:/deps/skia/out/Release-x64 `
+              -DSKIA_LIBRARY=C:/deps/skia/out/Release-x64/skia.lib `
+              -DENABLE_SCRIPTING=ON `
+              -DENABLE_TESTS=OFF `
+              -G Ninja ..
+        echo "CMake configuration complete"
+        
+    - name: 🔨 Build with Ninja
+      shell: pwsh
+      run: |
+        cd build
+        ninja aseprite
+        echo "Build complete!"
+        
+    - name: 📦 Create Portable Package
+      shell: pwsh
+      run: |
+        # Create portable folder
+        mkdir aseprite-portable
+        copy build\bin\aseprite.exe aseprite-portable\
+        
+        # Copy any DLLs if they exist
+        copy build\bin\*.dll aseprite-portable\ 2>$null || echo "No DLLs to copy"
+        
+        # Copy data folder
+        xcopy build\bin\data aseprite-portable\data /E /I /Y
+        
+        # Verify the exe exists
+        if (Test-Path "aseprite-portable\aseprite.exe") {
+          echo "✅ aseprite.exe created successfully!"
+          dir aseprite-portable
+        } else {
+          echo "❌ ERROR: aseprite.exe not found!"
+          exit 1
+        }
+        
+    - name: ⬆️ Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: aseprite-windows-portable
+        path: aseprite-portable/
+        retention-days: 1
